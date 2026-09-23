@@ -1,0 +1,91 @@
+/* 全局基础样式：专业 CAD 桌面风 */
+:root {
+  /* 表面色阶（从顶到底） */
+  --color-bg: #1f2329;
+  --color-panel: #2a2f38;
+  --color-panel-2: #232831;
+  --color-panel-elevated: #353b47;
+  --color-border: #3a4049;
+  --color-border-strong: #4a525e;
+
+  /* 文字色阶 */
+  --color-text: #e7eaef;
+  --color-text-secondary: #a4adbb;
+  --color-text-tertiary: #7a8290;
+  --color-text-on-primary: #ffffff;
+
+  /* 主题重点色：青蓝 */
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-soft: rgba(59, 130, 246, 0.15);
+  --color-accent: #38bdf8;
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+
+  /* 画布色（深灰底白图，便于识别） */
+  --color-canvas: #0f1115;
+
+  /* 尺寸变量 */
+  --topbar-height: 56px;
+  --statusbar-height: 28px;
+  --sidebar-width: 288px;
+  --layerpanel-width: 248px;
+  --ai-drawer-width: 360px;
+
+  /* 阴影 */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 1px rgba(0, 0, 0, 0.12);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);
+
+  /* 缓动 */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Inter", "Microsoft YaHei", "PingFang SC", "Segoe UI",
+    system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #4a525e;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #5a6470;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
