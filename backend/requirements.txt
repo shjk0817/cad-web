@@ -1,4 +1,15 @@
+# DWG 解析与图纸提取系统 — 后端依赖
+
+# Web 框架
 fastapi>=0.110
 uvicorn[standard]>=0.27
-python-multipart>=0.0.9
+
+# DWG / DXF 解析
 ezdxf>=1.3
+
+# HTTP 客户端（LLM Provider 直连）
+httpx>=0.27
+
+# VLM 截图渲染
+matplotlib>=3.5
+Pillow>=9

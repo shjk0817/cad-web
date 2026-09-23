@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { sheetUrl, uploadDwg } from './api'
 import type {
+  AuditTask,
   FileItem,
   LayerInfo,
   Sheet,
@@ -18,9 +19,24 @@ import StatusBar from './components/StatusBar'
 import ViewportHud from './components/ViewportHud'
 import ToastHost from './components/ToastHost'
 import AIDrawer from './components/AIDrawer'
+import AuditReportPage from './pages/AuditReportPage'
 import './App.css'
 
+// 简易 hash 路由；约定：# → 主界面，#/audit/<taskId> → 复核报告页
+function readRoute(): { page: 'main' | 'audit'; taskId: string } {
+  const h = window.location.hash || ''
+  const m = h.match(/^#\/audit\/([^/?#]+)/)
+  if (m) return { page: 'audit', taskId: decodeURIComponent(m[1]) }
+  return { page: 'main', taskId: '' }
+}
+
 export default function App() {
+  const [route, setRoute] = useState(() => readRoute())
+  useEffect(() => {
+    const onHash = () => setRoute(readRoute())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   const [files, setFiles] = useState<FileItem[]>([])
   const [activeUid, setActiveUid] = useState<string | null>(null)
   const [activeSheet, setActiveSheet] = useState<Sheet | null>(null)
@@ -288,153 +304,162 @@ export default function App() {
 
   return (
     <div className="app">
-      <Topbar
-        busy={parsingCount > 0}
-        fileName={activeFile?.name ?? null}
-        sheetName={activeSheet?.name ?? null}
-        canFitView={Boolean(dxfUrl)}
-        showLayers={showLayers}
-        aiOpen={aiOpen}
-        onFiles={handleFiles}
-        onSelectFile={() => activeFile && handleSelectFile(activeFile)}
-        onFitView={() => canvasRef.current?.fitView()}
-        onToggleLayers={() => setShowLayers((s) => !s)}
-        onToggleAi={() => setAiOpen((o) => !o)}
-      />
-      <input
-        ref={topInputRef}
-        type="file"
-        accept=".dwg"
-        multiple
-        className="file-input"
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? [])
-          if (files.length > 0) handleFiles(files)
-          e.target.value = ''
-        }}
-      />
-
-      <div className="main">
-        <aside className="sidebar">
-          <FileList
-            files={files}
-            activeUid={activeUid}
-            onSelect={handleSelectFile}
-            onUploadClick={handleTopUpload}
+      {route.page === 'audit' ? (
+        <AuditReportPage taskId={route.taskId} />
+      ) : (
+        <>
+          <Topbar
+            busy={parsingCount > 0}
+            fileName={activeFile?.name ?? null}
+            sheetName={activeSheet?.name ?? null}
+            canFitView={Boolean(dxfUrl)}
+            showLayers={showLayers}
+            aiOpen={aiOpen}
+            onFiles={handleFiles}
+            onSelectFile={() => activeFile && handleSelectFile(activeFile)}
+            onFitView={() => canvasRef.current?.fitView()}
+            onToggleLayers={() => setShowLayers((s) => !s)}
+            onToggleAi={() => setAiOpen((o) => !o)}
           />
-          {activeFile &&
-            (activeFile.sheets && activeFile.sheets.length > 0 ? (
-              <SheetList
-                sheets={activeFile.sheets}
-                activeId={activeSheet?.id ?? null}
-                onSelect={handleSelectSheet}
+          <input
+            ref={topInputRef}
+            type="file"
+            accept=".dwg"
+            multiple
+            className="file-input"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? [])
+              if (files.length > 0) handleFiles(files)
+              e.target.value = ''
+            }}
+          />
+
+          <div className="main">
+            <aside className="sidebar">
+              <FileList
+                files={files}
+                activeUid={activeUid}
+                onSelect={handleSelectFile}
+                onUploadClick={handleTopUpload}
               />
-            ) : (
-              <section className="sidebar-section">
-                <header className="side-section-header">
-                  <h2 className="side-title">图纸清单</h2>
-                </header>
-                <p className="side-empty">
-                  {activeFile.status === 'error'
-                    ? '解析失败，请重新上传'
-                    : activeFile.status === 'parsing'
-                      ? `解析中… ${activeFile.progress ?? 0}%`
-                      : '未解析出图纸'}
-                </p>
-                {activeFile.status === 'parsing' && (
-                  <div className="file-progress">
-                    <div
-                      className="file-progress-bar"
-                      style={{ width: `${activeFile.progress ?? 0}%` }}
+              {activeFile &&
+                (activeFile.sheets && activeFile.sheets.length > 0 ? (
+                  <SheetList
+                    sheets={activeFile.sheets}
+                    activeId={activeSheet?.id ?? null}
+                    onSelect={handleSelectSheet}
+                  />
+                ) : (
+                  <section className="sidebar-section">
+                    <header className="side-section-header">
+                      <h2 className="side-title">图纸清单</h2>
+                    </header>
+                    <p className="side-empty">
+                      {activeFile.status === 'error'
+                        ? '解析失败，请重新上传'
+                        : activeFile.status === 'parsing'
+                          ? `解析中… ${activeFile.progress ?? 0}%`
+                          : '未解析出图纸'}
+                    </p>
+                    {activeFile.status === 'parsing' && (
+                      <div className="file-progress">
+                        <div
+                          className="file-progress-bar"
+                          style={{ width: `${activeFile.progress ?? 0}%` }}
+                        />
+                      </div>
+                    )}
+                  </section>
+                ))}
+            </aside>
+
+            <section className="viewport-wrap">
+              <div className="viewport">
+                {dxfUrl ? (
+                  <>
+                    <DxfCanvas
+                      ref={canvasRef}
+                      url={dxfUrl}
+                      onLayersLoaded={handleLayersLoaded}
+                      onHudChange={setHud}
                     />
+                    <ViewportHud
+                      hud={hud}
+                      selectedLayerCount={hiddenLayers.size}
+                      totalLayers={layers.length}
+                    />
+                  </>
+                ) : null}
+
+                {files.length === 0 && !dxfUrl && (
+                  <div className="state-overlay">
+                    <p className="state-title">拖入 DWG 文件，或点击左上角「选择 DWG」</p>
+                    <p className="state-hint">
+                      支持批量上传与多图纸 DWG，上传后可在左侧切换文件、图纸与图层
+                    </p>
+                    <button
+                      type="button"
+                      className="tool-btn primary"
+                      onClick={handleTopUpload}
+                      style={{ marginTop: 12 }}
+                    >
+                      ＋ 选择 DWG 文件
+                    </button>
                   </div>
                 )}
-              </section>
-            ))}
-        </aside>
 
-        <section className="viewport-wrap">
-          <div className="viewport">
-            {dxfUrl ? (
-              <>
-                <DxfCanvas
-                  ref={canvasRef}
-                  url={dxfUrl}
-                  onLayersLoaded={handleLayersLoaded}
-                  onHudChange={setHud}
-                />
-                <ViewportHud
-                  hud={hud}
-                  selectedLayerCount={hiddenLayers.size}
-                  totalLayers={layers.length}
-                />
-              </>
-            ) : null}
-
-            {files.length === 0 && !dxfUrl && (
-              <div className="state-overlay">
-                <p className="state-title">拖入 DWG 文件，或点击左上角「选择 DWG」</p>
-                <p className="state-hint">
-                  支持批量上传与多图纸 DWG，上传后可在左侧切换文件、图纸与图层
-                </p>
-                <button
-                  type="button"
-                  className="tool-btn primary"
-                  onClick={handleTopUpload}
-                  style={{ marginTop: 12 }}
-                >
-                  ＋ 选择 DWG 文件
-                </button>
+                {parsingCount > 0 && !dxfUrl && (
+                  <div className="state-overlay state-overlay-mask">
+                    <div className="spinner" />
+                    <p className="state-title">
+                      {parsingCount > 1
+                        ? `正在解析 ${parsingCount} 个文件…`
+                        : '正在解析…'}
+                    </p>
+                    <p className="state-hint">{currentStageText}</p>
+                    <div className="progress">
+                      <div
+                        className="progress-bar"
+                        style={{ width: `${overallProgress}%` }}
+                      />
+                    </div>
+                    <p className="state-progress-text">{overallProgress}%</p>
+                  </div>
+                )}
               </div>
-            )}
 
-            {parsingCount > 0 && !dxfUrl && (
-              <div className="state-overlay state-overlay-mask">
-                <div className="spinner" />
-                <p className="state-title">
-                  {parsingCount > 1
-                    ? `正在解析 ${parsingCount} 个文件…`
-                    : '正在解析…'}
-                </p>
-                <p className="state-hint">{currentStageText}</p>
-                <div className="progress">
-                  <div
-                    className="progress-bar"
-                    style={{ width: `${overallProgress}%` }}
-                  />
-                </div>
-                <p className="state-progress-text">{overallProgress}%</p>
-              </div>
+              <StatusBar
+                fileCount={files.length}
+                parsingCount={parsingCount}
+                hiddenLayerCount={hiddenLayers.size}
+                totalLayers={layers.length}
+                ready={Boolean(dxfUrl)}
+              />
+            </section>
+
+            {showLayers && (
+              <LayerPanel
+                layers={layers}
+                hidden={hiddenLayers}
+                onToggle={handleToggleLayer}
+                onSolo={handleSoloLayer}
+                onOnly={handleOnlyLayer}
+              />
             )}
           </div>
 
-          <StatusBar
-            fileCount={files.length}
-            parsingCount={parsingCount}
-            hiddenLayerCount={hiddenLayers.size}
-            totalLayers={layers.length}
-            ready={Boolean(dxfUrl)}
+          <AIDrawer
+            open={aiOpen}
+            fileId={fileId}
+            sheet={activeSheet}
+            onClose={() => setAiOpen(false)}
+            onToast={pushToast}
+            onAuditDone={(task: AuditTask) => {
+              window.location.hash = `#/audit/${encodeURIComponent(task.id)}`
+            }}
           />
-        </section>
-
-        {showLayers && (
-          <LayerPanel
-            layers={layers}
-            hidden={hiddenLayers}
-            onToggle={handleToggleLayer}
-            onSolo={handleSoloLayer}
-            onOnly={handleOnlyLayer}
-          />
-        )}
-
-        <AIDrawer
-          open={aiOpen}
-          fileId={fileId}
-          sheet={activeSheet}
-          onClose={() => setAiOpen(false)}
-          onToast={pushToast}
-        />
-      </div>
+        </>
+      )}
 
       {dragActive && (
         <div className="drop-mask">

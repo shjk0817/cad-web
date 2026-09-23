@@ -5,7 +5,7 @@
 
 ## 方案概述
 - **后端**：在 `backend/app/` 下新增 `llm/`（多 Provider 模型抽象层）与 `audit/`（四阶段流水线）两个 package，沿用 FastAPI + 内存任务状态机 + SSE 推送模式。
-- **模型层**：`Provider` 抽象基类；预置 OpenAI 兼容协议（覆盖 OpenAI / DeepSeek / 通义千问 / 智谱 / Moonshot / Ollama / vLLM / 任意兼容 endpoint）、Anthropic 原生协议、Google Gemini 原生协议；支持完全自定义 Provider（用户填 baseUrl + apiKey + modelId + 协议类型）。
+- **模型层**：`Provider` 抽象基类；预置国产 + 本地主流厂商的 OpenAI 兼容协议（DeepSeek、通义千问、智谱 GLM、豆包、文心 ERNIE、腾讯混元、Moonshot Kimi、Ollama、vLLM），保留「自定义」入口以接入国外厂商（OpenAI / Anthropic / Gemini 原生协议）。各厂商视觉主力模型：DeepSeek `deepseek-flash`（V4.1-Flash 原生多模态）、Qwen `qwen-vl-max` / `qwen3-vl-max`、GLM `glm-4.6v`、Doubao `doubao-seed-2-1-pro`、ERNIE `ernie-5.0`、混元 `hy-vision-2.0`、Kimi `kimi-k3`。
 - **流水线**：阶段① 规则管线（确定性几何 + 文字结构化）→ 阶段② VLM 筛选（防多选 + 人工闸门）→ 阶段③ 文本 LLM 推理计算 → 阶段④ 三方对账 → 输出差异报告。
 - **前端**：保留 AIDrawer 作为触发入口（4 类构件入口 + 任务列表 + 「查看完整报告」）；新增 `/audit/:taskId` 全屏报告页（图纸截图 + 构件高亮 + 对账表 + 步骤时间线 + 调试模式开关）；新增「模型设置」面板（Provider 管理 + Key 配置 + 测试连接）。
 - **数据流**：
@@ -41,15 +41,34 @@ AIDrawer 摘要 + 「查看完整报告」→ /audit/:taskId
 ## ADDED Requirements
 
 ### Requirement: 多 Provider 模型抽象层
-系统 SHALL 提供统一的 `Provider` 接口（`chat(messages)`、`vision(images, prompt)`、`stream_chat(messages)`），并预置以下 Provider：OpenAI（OpenAI 兼容）、Anthropic（原生）、Google Gemini（原生）、DeepSeek（OpenAI 兼容）、通义千问（OpenAI 兼容）、智谱 GLM（OpenAI 兼容）、Moonshot Kimi（OpenAI 兼容）、Ollama（OpenAI 兼容）、vLLM（OpenAI 兼容）、自定义（OpenAI 兼容 / Anthropic 原生 / Gemini 原生）。
+系统 SHALL 提供统一的 `Provider` 接口（`chat(messages)`、`vision(images, prompt)`、`stream_chat(messages)`），并按「国产优先」原则预置以下 Provider（全部 `supportsVision=True`，厂商均已具备原生多模态能力）：
+
+| Provider | 协议 | 视觉主力模型 | BaseURL |
+|---|---|---|---|
+| DeepSeek | OpenAI 兼容 | `deepseek-flash`（V4.1-Flash） | `https://api.deepseek.com/v1` |
+| 通义千问 | OpenAI 兼容 | `qwen-vl-max` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| 智谱 GLM | OpenAI 兼容 | `glm-4.6v` | `https://open.bigmodel.cn/api/paas/v4/` |
+| 豆包 Doubao | OpenAI 兼容 | `doubao-seed-2-1-pro` | `https://ark.cn-beijing.volces.com/api/v3/` |
+| 文心 ERNIE | OpenAI 兼容 | `ernie-5.0` | `https://qianfan.baidubce.com/v2/` |
+| 腾讯混元 | OpenAI 兼容 | `hy-vision-2.0` | `https://api.hunyuan.cloud.tencent.com/v1` |
+| Moonshot Kimi | OpenAI 兼容 | `kimi-k3` | `https://api.moonshot.cn/v1` |
+| Ollama（本地） | OpenAI 兼容 | `qwen3-vl` | `http://localhost:11434/v1` |
+| vLLM（自托管） | OpenAI 兼容 | `Qwen/Qwen3-VL-72B-Instruct` | `http://localhost:8000/v1` |
+| 自定义（OpenAI 兼容 / Anthropic / Gemini 原生） | — | 用户填 | 用户填 |
+
+国外厂商（OpenAI / Anthropic / Gemini）不再预置，需要时通过「自定义」入口填 baseUrl + apiKey + modelId 接入。模型层 SHALL 不绑定任何商业 SDK，全部 HTTP 直连。
 
 系统 SHALL 通过 `GET /api/llm/providers` 列出预置 Provider 的元数据（名称/默认 baseUrl/支持 vision/默认 modelId），通过 `GET/POST/PUT/DELETE /api/llm/providers/configs` 管理已配置的 Provider 实例（name / providerType / baseUrl / apiKey / modelId / visionModelId / enabled），通过 `POST /api/llm/providers/configs/:id/test` 测试连接返回 `success` 或 `error`。
 
 Provider 配置 SHALL 落盘到 `backend/tmp/llm_providers.json`，重启后保留。
 
-#### Scenario: 用户配置 OpenAI 兼容自定义 Provider
-- **WHEN** 用户在「模型设置」选「自定义」，填入 baseUrl=`https://api.deepseek.com/v1`、apiKey、modelId=`deepseek-chat`、协议=OpenAI 兼容
-- **THEN** 系统保存配置并出现在 Provider 列表可用状态；后续 VLM/文本任务调用时按此配置走 OpenAI 兼容协议
+#### Scenario: 用户在「模型设置」直接启用 DeepSeek 预置
+- **WHEN** 用户在「模型设置」从预置列表选「DeepSeek」，只填 apiKey，其他字段（baseUrl、文本 modelId=`deepseek-chat`、视觉 modelId=`deepseek-flash`）自动带出
+- **THEN** 配置保存并出现在 Provider 列表可用状态；后续 VLM/文本任务调用时按此配置走 OpenAI 兼容协议，VLM 调用使用 `deepseek-flash`（原生多模态）
+
+#### Scenario: 用户接入国外厂商走「自定义」入口
+- **WHEN** 用户在「模型设置」新增 → 选「自定义（Anthropic 原生）」 → 填 baseUrl/apiKey/modelId
+- **THEN** 系统保存配置并出现在 Provider 列表可用状态；后续 VLM/文本任务调用时按此配置走 Anthropic 原生协议
 
 #### Scenario: 测试连接失败
 - **WHEN** 用户在「模型设置」点「测试连接」并配置错误 Key

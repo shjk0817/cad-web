@@ -4,6 +4,11 @@ import type {
   UploadResponse,
   AiTaskRequest,
   AiTask,
+  AuditCategory,
+  AuditTask,
+  LLMProviderConfig,
+  LLMProviderListResponse,
+  LLMProviderTestResult,
 } from './types'
 
 // 上传阶段占总进度的 0%–15%（POST 字节回传进度），
@@ -149,6 +154,11 @@ export function sheetUrl(fileId: string, sheetId: string): string {
   return `/api/dwg/${encodeURIComponent(fileId)}/sheets/${encodeURIComponent(sheetId)}`
 }
 
+// 复核 VLM 用截图（用于 SheetCandidateList 缩略图）
+export function auditSheetPngUrl(taskId: string, sheetId: string): string {
+  return `/api/audit/tasks/${encodeURIComponent(taskId)}/sheets/${encodeURIComponent(sheetId)}/png`
+}
+
 // ========= AI 识别接口 =========
 // 当前后端尚未提供 AI 识别，这里先封装 fetch；不通时返回占位结果。
 // 后续接入真实服务时只需替换 fetch 逻辑与响应类型。
@@ -167,4 +177,213 @@ export async function submitAiTask(req: AiTaskRequest): Promise<AiTask> {
   } catch {
     throw new Error('AI 识别功能尚未上线')
   }
+}
+
+// ========= 工程量审计接口 =========
+
+async function readError(res: Response): Promise<Error> {
+  let detail = `请求失败（HTTP ${res.status}）`
+  try {
+    const text = await res.text()
+    if (text) {
+      try {
+        const body = JSON.parse(text) as { detail?: string }
+        if (body && typeof body.detail === 'string') {
+          detail = body.detail
+        } else {
+          detail = text
+        }
+      } catch {
+        detail = text
+      }
+    }
+  } catch {
+    /* noop */
+  }
+  const err = new Error(detail)
+  ;(err as Error & { status?: number }).status = res.status
+  return err
+}
+
+export async function createAuditTask(req: {
+  fileId: string
+  categories: AuditCategory[]
+  visionProviderId?: string
+  chatProviderId?: string
+}): Promise<AuditTask> {
+  const res = await fetch('/api/audit/tasks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as AuditTask
+}
+
+export async function getAuditTask(taskId: string): Promise<AuditTask> {
+  const res = await fetch(
+    `/api/audit/tasks/${encodeURIComponent(taskId)}`,
+  )
+  if (!res.ok) throw await readError(res)
+  const body = await res.json()
+  // 兼容后端可能包装为 { task: ... }
+  if (body && typeof body === 'object' && 'task' in body) {
+    return body.task as AuditTask
+  }
+  return body as AuditTask
+}
+
+export async function listAuditTasks(): Promise<AuditTask[]> {
+  const res = await fetch('/api/audit/tasks')
+  if (!res.ok) throw await readError(res)
+  const body = await res.json()
+  return (body?.tasks || []) as AuditTask[]
+}
+
+export async function confirmAuditSheets(
+  taskId: string,
+  sheetIds: string[],
+): Promise<AuditTask> {
+  const res = await fetch(
+    `/api/audit/tasks/${encodeURIComponent(taskId)}/confirm-sheets`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheetIds }),
+    },
+  )
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as AuditTask
+}
+
+export async function runAuditStep(
+  taskId: string,
+  step: 'rules' | 'vlm_select' | 'llm_infer' | 'reconcile',
+): Promise<AuditTask> {
+  const res = await fetch(
+    `/api/audit/tasks/${encodeURIComponent(taskId)}/step`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: step }),
+    },
+  )
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as AuditTask
+}
+
+// SSE 流：订阅 audit 任务的 stage / progress / error / done 事件
+export function auditStream(
+  taskId: string,
+  onEvent: (e: { type: string; data: any }) => void,
+): () => void {
+  const es = new EventSource(
+    `/api/audit/tasks/${encodeURIComponent(taskId)}/stream`,
+  )
+  // 后端只推单条 "data: <json>\n\n" 事件；前端自己根据 payload.stage/status 区分
+  es.onmessage = (ev) => {
+    let parsed: any = ev.data
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed)
+      } catch {
+        /* 保留字符串原值 */
+      }
+    }
+    const stage = parsed?.stage || 'unknown'
+    const status = parsed?.status || 'unknown'
+    onEvent({ type: `${stage}.${status}`, data: parsed })
+    if (status === 'done' || status === 'error') {
+      try {
+        es.close()
+      } catch {
+        /* noop */
+      }
+    }
+  }
+  es.onerror = () => {
+    try {
+      es.close()
+    } catch {
+      /* noop */
+    }
+  }
+  return () => {
+    try {
+      es.close()
+    } catch {
+      /* noop */
+    }
+  }
+}
+
+// ========= LLM Provider 接口 =========
+
+function stripEmpty<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {}
+  for (const k of Object.keys(obj) as (keyof T)[]) {
+    const v = obj[k]
+    if (v === undefined || v === null) continue
+    if (typeof v === 'string' && v.trim() === '') continue
+    out[k] = v
+  }
+  return out
+}
+
+export async function listLlmProviders(): Promise<LLMProviderListResponse> {
+  const res = await fetch('/api/llm/providers')
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as LLMProviderListResponse
+}
+
+export async function createLlmProvider(
+  cfg: Omit<LLMProviderConfig, 'id'>,
+): Promise<LLMProviderConfig> {
+  const body = stripEmpty(cfg as unknown as Record<string, unknown>)
+  const res = await fetch('/api/llm/providers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as LLMProviderConfig
+}
+
+export async function updateLlmProvider(
+  id: string,
+  patch: Partial<LLMProviderConfig>,
+): Promise<LLMProviderConfig> {
+  const body = stripEmpty(patch as unknown as Record<string, unknown>)
+  const res = await fetch(
+    `/api/llm/providers/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as LLMProviderConfig
+}
+
+export async function deleteLlmProvider(
+  id: string,
+): Promise<{ ok: true }> {
+  const res = await fetch(
+    `/api/llm/providers/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as { ok: true }
+}
+
+export async function testLlmProvider(
+  id: string,
+): Promise<LLMProviderTestResult> {
+  const res = await fetch(
+    `/api/llm/providers/${encodeURIComponent(id)}/test`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+  )
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as LLMProviderTestResult
 }

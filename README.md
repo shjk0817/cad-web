@@ -1,6 +1,6 @@
 # cad-web
 
-> DWG 多图纸浏览与提取系统 — 上传一份 DWG，自动按标准图框拆出多张图纸，支持在线切换、图层显隐、AI 识别（占位中）。
+> DWG 多图纸浏览 + 工程量复核系统 — 上传一份 DWG，自动按标准图框拆出多张图纸，在线浏览与图层显隐；并通过 5 阶段流水线（规则管线 → VLM 选图 → 用户确认 → 文本 LLM 推理 → 三方对账）进行支护桩 / 钻孔灌注桩 / 地下连续墙 / 承台工程量复核。
 
 ## ✨ 功能特性
 
@@ -9,14 +9,20 @@
 - **图层交互**：勾选显隐 / 全部显示与隐藏 / 仅显示 / 隔离 / 关键字搜索
 - **AI 识别占位**：右侧抽屉内置「提取标题栏 / 标注图元 / 图纸摘要 / 针对图纸提问」4 类任务入口，等待后端 `/api/ai/tasks` 实装
 - **SHA-256 缓存**：相同 DWG 不重复解析
-- **SSE 进度流**：上传 / 解析阶段实时进度
+- **SSE 进度流**：上传 / 解析 / 复核阶段实时进度
+- **工程量复核（5 阶段流水线）**：
+  1. **规则管线**（`audit/rules.py`）：从 ezdxf 解析结果抽出 4 类（支护桩 / 钻孔灌注桩 / 地连墙 / 承台）候选数据
+  2. **VLM 选图**（`audit/vlm_select.py`）：contact-sheet 拼接 + 国产 VLM Provider 打分与排序
+  3. **用户确认**：前端 `SheetCandidateList` 勾选参与复核的图纸
+  4. **文本 LLM 推理**（`audit/llm_infer.py`）：DeepSeek / 通义 / GLM / 豆包 / 文心 / 混元 / Kimi + Ollama / vLLM / 自定义
+  5. **三方对账**（`audit/reconcile.py`）：规则值 ↔ 标注值 ↔ LLM 值的 match / warn / conflict 报告
 
 ## 🧱 架构
 
 ```
 cad-web/
 ├── backend/          # FastAPI + LibreDWG + ezdxf (Python 3.9+)
-├── frontend/         # React 19 + Vite + dxf-viewer (TypeScript)
+├── frontend/         # React 18 + Vite + dxf-viewer (TypeScript)
 ├── tools/            # 第三方构建脚本（如 libredwg 工具下载）
 └── docs/             # 设计与开发日志
 ```
@@ -44,11 +50,33 @@ npm run dev
 
 浏览器打开 `http://localhost:5180`，把 DWG 拖到窗口或上拉编辑器。
 
+### 工程量复核端到端测试
+
+```bash
+cd backend
+python -m app.tests.test_audit_pipeline
+```
+
+8 步集成测试：POST 任务 → 等待 awaiting_confirm → confirm-sheets → 等待 done → 调试模式 /step 重跑 rules → SSE 订阅 → 错误路径（404/400）。
+
+## 🔌 复核 API 速览
+
+| Method | Path | 说明 |
+| ------ | ---- | ---- |
+| POST   | `/api/audit/tasks`                            | 创建复核任务（body: `fileId / categories`） |
+| GET    | `/api/audit/tasks`                            | 列出所有复核任务 |
+| GET    | `/api/audit/tasks/{id}`                       | 任务详情 |
+| POST   | `/api/audit/tasks/{id}/confirm-sheets`       | 用户确认 VLM 选图（body: `sheetIds: string[]`） |
+| POST   | `/api/audit/tasks/{id}/step`                  | 调试模式单步重跑（body: `stage: rules\|vlm_select\|llm_infer\|reconcile`） |
+| GET    | `/api/audit/tasks/{id}/stream`                | SSE 进度流（`text/event-stream`，15s ping + sig 去重） |
+| GET    | `/api/audit/tasks/{id}/sheets/{sid}/png`      | 单张图纸 PNG 缩略图（vlm_select 后渲染） |
+
 ## 📝 备注
 
 - `earthwork/`、`*.dwg`、`*.dxf`、`*.docx` 等真实工程资料均已在 `.gitignore` 中屏蔽
-- 前端默认配置 [vue.config.ts](file:///Users/slouch/Desktop/cad-web/frontend/vite.config.ts) `/api` 代理到 `http://localhost:8000`
-- AI 识别接口当前为占位，返回「AI 识别功能尚未上线」；后端实装后只需实现 `POST /api/ai/tasks` 返回 `AiTask` 类型
+- 前端默认配置 [vite.config.ts](file:///Users/slouch/Desktop/cad-web/frontend/vite.config.ts) `/api` 代理到 `http://localhost:8000`
+- 工程量复核依赖 LLM Provider 配置，详见 `backend/app/llm/registry.py`（国产 / Ollama / vLLM / 自定义 OpenAI 兼容）
+- 报告页：`#/audit/<taskId>` 全屏展示 5 阶段时间线 + 三方对账明细 + 调试模式单步重跑
 
 ## 📄 License
 

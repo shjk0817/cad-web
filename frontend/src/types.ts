@@ -126,3 +126,156 @@ export interface ViewHud {
   zoom: number
   cursor: { x: number; y: number } | null
 }
+
+// ========= 工程量审计系统 =========
+export type AuditCategory =
+  | 'retaining_pile'
+  | 'bored_pile'
+  | 'diaphragm_wall'
+  | 'cap'
+
+export type AuditStage =
+  | 'queued'
+  | 'rules'
+  | 'vlm_select'
+  | 'awaiting_confirm'
+  | 'llm_infer'
+  | 'reconcile'
+  | 'done'
+  | 'error'
+
+export interface RuleDraftRow {
+  id: string
+  fields: Record<
+    string,
+    { value: number | string | null; source: 'geometry' | 'table' | 'annotation' }
+  >
+}
+
+export interface RuleDraft {
+  byCategory: Record<AuditCategory, RuleDraftRow[]>
+}
+
+export interface VlmCandidate {
+  sheetId: string
+  sheetName?: string
+  role: string
+  score: number
+  reason: string
+  relevantLayers?: string[]
+}
+
+export interface LlmField {
+  value: number | string | null
+  trace: string
+}
+
+export interface LlmResultRow {
+  id: string
+  fields: Record<string, LlmField>
+}
+
+export interface LlmResult {
+  byCategory: Record<AuditCategory, LlmResultRow[]>
+}
+
+export interface ReconcileFieldRow {
+  field: string
+  ruleValue?: any
+  llmValue?: any
+  annoValue?: any
+  diff?: string
+  severity: 'match' | 'warn' | 'conflict'
+}
+
+export interface ReconcileCategoryReport {
+  rows: ReconcileFieldRow[]
+  confidence: number
+}
+
+export interface ReconcileReport {
+  byCategory: Record<AuditCategory, ReconcileCategoryReport>
+  summary: {
+    totalRows: number
+    matched: number
+    warned: number
+    conflicted: number
+  }
+  confidence: number
+}
+
+export interface StepState<T = any> {
+  status: 'idle' | 'running' | 'done' | 'error'
+  result?: T
+  error?: string
+  startedAt?: number
+  finishedAt?: number
+}
+
+export interface AuditTask {
+  id: string
+  fileId: string
+  status: 'running' | 'awaiting_confirm' | 'done' | 'error'
+  stage: AuditStage
+  progress: number
+  message: string
+  createdAt: number
+  updatedAt: number
+  categories: AuditCategory[]
+  visionProviderId: string
+  chatProviderId: string
+  sheetIds: string[]
+  sheetNames: string[]
+  vlmCandidates: VlmCandidate[]
+  confirmedSheets: string[]
+  steps: Record<AuditStage, AuditStepState>
+  ruleDraft?: RuleDraft
+  llmResult?: LlmResult
+  reconcileReport?: ReconcileReport
+  detail?: string
+}
+
+export interface AuditStepState {
+  stage: AuditStage
+  status: 'pending' | 'running' | 'done' | 'error'
+  startedAt?: number
+  finishedAt?: number
+  message: string
+  payload?: any
+}
+
+// ========= LLM Provider 配置 =========
+export type LLMProtocol = 'openai' | 'anthropic' | 'gemini'
+
+export interface LLMProviderPreset {
+  id: string
+  name: string
+  protocol: LLMProtocol
+  defaultBaseUrl: string
+  defaultChatModel: string
+  defaultVisionModel: string
+  supportsVision: boolean
+  docUrl?: string
+}
+
+export interface LLMProviderConfig {
+  id: string
+  presetId: string
+  name: string
+  protocol: LLMProtocol
+  baseUrl: string
+  apiKey: string
+  chatModel: string
+  visionModel: string
+  enabled: boolean
+}
+
+export interface LLMProviderListResponse {
+  presets: LLMProviderPreset[]
+  configs: LLMProviderConfig[]
+}
+
+export interface LLMProviderTestResult {
+  success: boolean
+  error?: string
+}

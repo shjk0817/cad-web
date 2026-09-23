@@ -25,6 +25,8 @@ from fastapi.responses import StreamingResponse
 from . import config
 from .converter import ConversionError, convert_dwg_to_dxf
 from .frames import detect_frames
+from .llm.routes import router as llm_router
+from .audit.routes import router as audit_router
 from .splitter import split_document
 from .tasks import TASKS, TaskState
 
@@ -108,6 +110,13 @@ app.add_middleware(
 def health():
     """健康检查，同时返回 dwg2dxf 路径（未配置为 null）。"""
     return {"ok": True, "dwg2dxf": config.DWG2DXF_PATH}
+
+
+# 多 Provider 模型抽象层 REST 接口（/api/llm/providers/...）
+app.include_router(llm_router)
+
+# 工程量复核 REST + SSE（/api/audit/...）
+app.include_router(audit_router)
 
 
 def _sheets_payload(sheets: list) -> list:
